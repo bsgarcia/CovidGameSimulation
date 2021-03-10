@@ -1,7 +1,48 @@
 import numpy as np
+
 import itertools as it
 import matplotlib.pyplot as plt
 import scipy.stats as stats
+
+# class KLevelAgent:
+#     def __init__(self, game_id, money, factor,
+#                  a_disclose, b_disclose, lr_disclose, temp, k_level):
+#         self.factor = factor
+#         self.game_id = game_id
+#         self.money = money
+#         self.init_endowment = money
+#         self.a_disclose = a_disclose
+#         self.b_disclose = b_disclose
+#         self.lr_disclose = lr_disclose
+#         self.k_level = k_level
+#         self.temp = temp
+#
+#     def contribute(self):
+#         if k_level == 0:
+#             contribution = np.random.choice(range(self.money))
+#         if k_level == 1:
+#             contrib, opponent_contrib, expected = [], [], []
+#
+#             for c1, c2 in it.product(
+#                     range(1, self.money+1), range(1, self.money+1)):
+#                 for f in self.possible_factors:
+#                     expected.append(
+#                         ((self.factor*c1 + f*c2)/2 + self.money - c1) * (1/self.init_endowment)
+#                     )
+#                     contrib.append(c1)
+#
+#             expected = np.array(np.round(expected, 1))
+#             contrib = np.array(contrib)
+#
+#             possible_contrib = contrib[np.max(expected) == expected]
+#
+#             if len(possible_contrib) > 1:
+#                 print(
+#                     'Warning: multiple contributions value maximize expected reward'
+#                 )
+#
+#             return np.random.choice(possible_contrib)
+#
 
 #
 # class DeterministicAgent:
@@ -57,22 +98,48 @@ import scipy.stats as stats
 
 
 class BayesianAgent:
-    def __init__(self, game_id, money, factor, param_contrib, alpha, lr_contrib, beta):
+    def __init__(self, game_id, money, factor, possible_factors, alpha, lr_contrib, beta):
         self.factor = factor
+        self.possible_factors = possible_factors
         self.game_id = game_id
         self.money = money
-        self.param_contrib = param_contrib
+        
         self.lr_contrib = lr_contrib
         self.alpha = alpha
         self.beta = beta
 
         self.q = {k: v for k in [True, False]
                   for v in [
-                      {k2: 0 for k2 in [None, ] + [1.2, .8]}
+                      {k2: 0 for k2 in [None, 1.2, .8]}
         ]}
 
-    def contribute(self):
-        return np.round((np.random.beta(*self.param_contrib)) * self.money)
+        self.y_contrib = {k: v for k in [True, False]
+                for v in [
+                {k2: np.ones([1, money+1])[0] for k2 in [None, 1.2, .8]}
+         ]}
+
+    def contribute(self, opp_factor, disclosed):
+        print(self.y_contrib[disclosed][opp_factor])dd
+        print(self.y_contrib)
+        p_opp = np.random.dirichlet(self.y_contrib[disclosed][opp_factor])
+        expected_rewards, contrib = [], []
+
+        for c1, c2 in it.product(
+                range(1, self.money+1), range(1, self.money+1)):
+            for f in self.possible_factors:
+                expected_rewards.append(
+                    ((self.factor*c1 + f*c2)/2 + self.money - c1) * p_opp[c2-1]
+                )
+                contrib.append(c1)
+
+        expected = np.array(expected_rewards)
+        contrib = np.array(contrib)
+        possible_contrib = contrib[np.max(expected) == expected]
+        return np.random.choice(possible_contrib)
+
+    def set_opponent_factor(self, opp_factor):
+        if opp_factor is not None:
+            self.possible_factors = opp_factor
 
     def disclose(self):
         p_disclose = 1/(1+(np.exp(self.beta *
@@ -82,51 +149,11 @@ class BayesianAgent:
         disclosed = np.random.choice([False, True], p=[1-p_disclose, p_disclose])
         return disclosed, self.factor if disclosed else None
 
-    def update_contrib_posterior(self, reward, disclosed, opp_type):
-        self.param_contrib[0] += self.lr_contrib * (reward >= self.q[disclosed][opp_type])
-        self.param_contrib[1] += self.lr_contrib * (reward <= self.q[disclosed][opp_type])
+    def update_contrib_posterior(self, disclosed, opp_factor, opp_contrib):
+        self.y_contrib[disclosed][opp_factor][opp_contrib-1] += self.lr_contrib
+
+    def learn(self, reward, disclosed, opp_type):
         self.q[disclosed][opp_type] += self.alpha * (reward - self.q[disclosed][opp_type])
-
-
-class KLevelAgent:
-    def __init__(self, game_id, money, factor,
-                 a_disclose, b_disclose, lr_disclose, temp, k_level):
-        self.factor = factor
-        self.game_id = game_id
-        self.money = money
-        self.init_endowment = money
-        self.a_disclose = a_disclose
-        self.b_disclose = b_disclose
-        self.lr_disclose = lr_disclose
-        self.k_level = k_level
-        self.temp = temp
-
-    def contribute(self):
-        if k_level == 0:
-            contribution = np.random.choice(range(self.money))
-        if k_level == 1:
-            contrib, opponent_contrib, expected = [], [], []
-
-            for c1, c2 in it.product(
-                    range(1, self.money+1), range(1, self.money+1)):
-                for f in self.possible_factors:
-                    expected.append(
-                        ((self.factor*c1 + f*c2)/2 + self.money - c1) * (1/self.init_endowment)
-                    )
-                    contrib.append(c1)
-
-            expected = np.array(np.round(expected, 1))
-            contrib = np.array(contrib)
-
-            possible_contrib = contrib[np.max(expected) == expected]
-
-            if len(possible_contrib) > 1:
-                print(
-                    'Warning: multiple contributions value maximize expected reward'
-                )
-
-            return np.random.choice(possible_contrib)
-#
 
 
 def generate_agents(n_agents, money, agent_class):
@@ -135,52 +162,46 @@ def generate_agents(n_agents, money, agent_class):
     np.random.shuffle(factors)
     for g in range(n_agents):
         agents.append(
-            agent_class(money=money, factor=factors.pop(),
-                        game_id=g, alpha=.5, lr_contrib=1, param_contrib=[1, 1],
-                        beta=2
+            agent_class(money=money, factor=factors.pop(), possible_factors=[.8, 1.2],
+                        game_id=g, alpha=.5, lr_contrib=1, beta=2
         ))
     return agents
 
 
 def main():
 
-    # np.random.seed(1)
-
     # endowment
     money = 10
 
+    # total agent
     n_agents = 100
-
-    agents = generate_agents(n_agents, money, BayesianAgent)
-
     n_trials = 50
 
-    import itertools as it
+    # generate all the agents
+    agents = generate_agents(n_agents, money, BayesianAgent)
 
     for t in range(n_trials):
         agent_ids = list(range(n_agents))
         np.random.shuffle(agent_ids)
 
-        print(t)
-
         for _ in range(n_agents//2):
             a1 = agents[agent_ids.pop()]
             a2 = agents[agent_ids.pop()]
 
-            a1_disclosed, a1_type = a1.disclose()
-            a2_disclosed, a2_type = a2.disclose()
+            a1_disclosed, f1 = a1.disclose()
+            a2_disclosed, f2 = a2.disclose()
 
-            c1 = a1.contribute()
-            c2 = a2.contribute()
+            c1 = a1.contribute(opp_factor=f2, disclosed=a1_disclosed)
+            c2 = a2.contribute(opp_factor=f1, disclosed=a2_disclosed)
 
             r1 = ((c1*a1.factor + c2*a2.factor)/2) - c1
             r2 = ((c1*a1.factor + c2*a2.factor)/2) - c2
 
-            a1.money += r1
-            a2.money += r2
+            a1.update_contrib_posterior(opp_contrib=c2, opp_factor=f2, disclosed=a1_disclosed)
+            a2.update_contrib_posterior(opp_contrib=c1, opp_factor=f1, disclosed=a2_disclosed)
 
-            a1.update_contrib_posterior(r1, a1_disclosed, a2_type)
-            a2.update_contrib_posterior(r2, a2_disclosed, a1_type)
+            a1.learn(r1, a1_disclosed, f2)
+            a2.learn(r2, a2_disclosed, f1)
 
 
     # a = 1
