@@ -4,6 +4,40 @@ import itertools as it
 import matplotlib.pyplot as plt
 import scipy.stats as stats
 
+import seaborn as sns
+
+#
+# class BayesianAgent:
+#     def __init__(self, game_id, money, factor,
+#                  a_contrib, b_contrib, a_disclose, b_disclose, lr_disclose, lr_contrib):
+#         self.factor = factor
+#         self.game_id = game_id
+#         self.money = money
+#         self.a_contrib = a_contrib
+#         self.b_contrib = b_contrib
+#         self.a_disclose = a_disclose
+#         self.b_disclose = b_disclose
+#         self.lr_contrib = lr_contrib
+#         self.lr_disclose = lr_disclose
+#         self.q = 0
+#
+#     def contribute(self, opponent_disclosed):
+#         return np.round((np.random.beta(a=self.a_contrib, b=self.b_contrib)) * self.money)
+#
+#     def disclose(self):
+#         p_disclose = np.random.beta(a=self.a_disclose, b=self.b_disclose)
+#         return np.random.choice([0, 1], p=[1-p_disclose, p_disclose]), p_disclose
+#
+#     def update_disclosure_posterior(self, opponent_disclosed):
+#         self.a_disclose += self.lr_disclose * opponent_disclosed
+#         self.b_disclose += self.lr_disclose * (not opponent_disclosed)
+#
+#     def update_contrib_posterior(self, reward):
+#         self.a_contrib += self.lr_contrib * (reward >= self.q)
+#         self.b_contrib += self.lr_contrib * (reward <= self.q)
+#         self.q += .5 * (reward - self.q)
+
+
 # class KLevelAgent:
 #     def __init__(self, game_id, money, factor,
 #                  a_disclose, b_disclose, lr_disclose, temp, k_level):
@@ -98,10 +132,8 @@ import scipy.stats as stats
 
 
 class BayesianAgent:
-    def __init__(self, game_id, money, factor, possible_factors, alpha, lr_contrib, beta):
+    def __init__(self, money, factor, possible_factors, alpha, lr_contrib, beta):
         self.factor = factor
-        self.possible_factors = possible_factors
-        self.game_id = game_id
         self.money = money
         
         self.lr_contrib = lr_contrib
@@ -110,43 +142,38 @@ class BayesianAgent:
 
         self.q = {k: v for k in [True, False]
                   for v in [
-                      {k2: 0 for k2 in [None, 1.2, .8]}
+                      {k2: 0 for k2 in [None, ] + possible_factors}
         ]}
 
         self.y_contrib = {k: v for k in [True, False]
                 for v in [
-                {k2: np.ones([1, money+1])[0] for k2 in [None, 1.2, .8]}
+                {k2: np.ones((1, money+1))[0] for k2 in [None, ] + possible_factors}
          ]}
 
     def contribute(self, opp_factor, disclosed):
-        print(self.y_contrib[disclosed][opp_factor])dd
-        print(self.y_contrib)
         p_opp = np.random.dirichlet(self.y_contrib[disclosed][opp_factor])
-        expected_rewards, contrib = [], []
+        expected_rewards = np.zeros((self.money, self.money))
+
+        if opp_factor is None:
+            opp_factor = 1
 
         for c1, c2 in it.product(
                 range(1, self.money+1), range(1, self.money+1)):
-            for f in self.possible_factors:
-                expected_rewards.append(
-                    ((self.factor*c1 + f*c2)/2 + self.money - c1) * p_opp[c2-1]
-                )
-                contrib.append(c1)
+            expected_rewards[c1-1, c2-1] = \
+                ((self.factor*c1 + opp_factor*c2)/2 - c1) * p_opp[c2-1]
 
-        expected = np.array(expected_rewards)
-        contrib = np.array(contrib)
-        possible_contrib = contrib[np.max(expected) == expected]
-        return np.random.choice(possible_contrib)
+        mean_er = np.mean(expected_rewards, axis=1)
 
-    def set_opponent_factor(self, opp_factor):
-        if opp_factor is not None:
-            self.possible_factors = opp_factor
+        return np.random.choice(range(1, self.money+1), p=self.softmax(mean_er))
+
 
     def disclose(self):
-        p_disclose = 1/(1+(np.exp(self.beta *
-            np.mean(list(self.q[False].values()))
-            - np.mean(list(self.q[True].values()))
-        )))
-        disclosed = np.random.choice([False, True], p=[1-p_disclose, p_disclose])
+        q = np.array([
+            np.mean(list(self.q[False].values())),
+            np.mean(list(self.q[True].values()))
+        ])
+
+        disclosed = np.random.choice([False, True], p=self.softmax(q))
         return disclosed, self.factor if disclosed else None
 
     def update_contrib_posterior(self, disclosed, opp_factor, opp_contrib):
@@ -155,15 +182,19 @@ class BayesianAgent:
     def learn(self, reward, disclosed, opp_type):
         self.q[disclosed][opp_type] += self.alpha * (reward - self.q[disclosed][opp_type])
 
+    def softmax(self, values):
+        return np.exp(values*self.beta)/np.sum(np.exp(values*self.beta))
+
+
 
 def generate_agents(n_agents, money, agent_class):
     agents = []
-    factors = [.8, ] * (n_agents//2) + [1.2, ] * (n_agents//2)
+    factors = [1.2 ] * (n_agents//2) + [1.2, ] * (n_agents//2)
     np.random.shuffle(factors)
-    for g in range(n_agents):
+    for _ in range(n_agents):
         agents.append(
-            agent_class(money=money, factor=factors.pop(), possible_factors=[.8, 1.2],
-                        game_id=g, alpha=.5, lr_contrib=1, beta=2
+            agent_class(money=money, factor=factors.pop(), possible_factors=[1.2, 1.2],
+                        alpha=.5, lr_contrib=2, beta=2
         ))
     return agents
 
@@ -174,19 +205,28 @@ def main():
     money = 10
 
     # total agent
-    n_agents = 100
-    n_trials = 50
+    n_agents = 50
+    n_trials = 800
 
     # generate all the agents
     agents = generate_agents(n_agents, money, BayesianAgent)
 
+    import pandas as pd
+
+    dd = []
+
     for t in range(n_trials):
+
         agent_ids = list(range(n_agents))
         np.random.shuffle(agent_ids)
 
         for _ in range(n_agents//2):
-            a1 = agents[agent_ids.pop()]
-            a2 = agents[agent_ids.pop()]
+
+            id1 = agent_ids.pop()
+            id2 = agent_ids.pop()
+
+            a1 = agents[id1]
+            a2 = agents[id2]
 
             a1_disclosed, f1 = a1.disclose()
             a2_disclosed, f2 = a2.disclose()
@@ -197,78 +237,64 @@ def main():
             r1 = ((c1*a1.factor + c2*a2.factor)/2) - c1
             r2 = ((c1*a1.factor + c2*a2.factor)/2) - c2
 
-            a1.update_contrib_posterior(opp_contrib=c2, opp_factor=f2, disclosed=a1_disclosed)
-            a2.update_contrib_posterior(opp_contrib=c1, opp_factor=f1, disclosed=a2_disclosed)
+            a1.update_contrib_posterior(
+                opp_contrib=c2, opp_factor=f2, disclosed=a1_disclosed)
+            a2.update_contrib_posterior(
+                opp_contrib=c1, opp_factor=f1, disclosed=a2_disclosed)
 
             a1.learn(r1, a1_disclosed, f2)
             a2.learn(r2, a2_disclosed, f1)
 
-
-    # a = 1
-    # b = 1
-    # x = np.linspace(0, 1, 100)
-    # plt.plot(x, stats.beta.pdf(x, a, b))
-    # plt.ylim([-.08, 1.08])
-    # plt.title('Disclosure priors')
-    # plt.show()
-    # lr1 = 5
-    # lr2 = 5
-    # p_disclose_1 = []
-    # p_disclose_2 = []
-    # contrib1 = []
-# contrib2 = []
+            dd.append(
+                {'id': id1, 'c': c1, 't': t, 'f': a1.factor, 'd': a1_disclosed, 'r': r1}
+            )
+            dd.append(
+                {'id': id2, 'c': c2, 't': t, 'f': a2.factor, 'd': a2_disclosed, 'r': r2}
+            )
 
 
-    # for t in range(nb_of_trials):
-    #
-    #     # ask to disclose
-    #     a1_disclosed, a1_p = a1.disclose()
-    #     a2_disclosed, a2_p = a2.disclose()
-    #
-    #     # save response
-    #     p_disclose_1.append(a1_p)
-    #     p_disclose_2.append(a2_p)
-    #
-    #     # update disclosure expectations
-    #     a1.update_disclosure_posterior(a2_disclosed)
-    #     a2.update_disclosure_posterior(a1_disclosed)
-    #
-    #     #contribute
-    #     c1 = a1.contribute(a2_disclosed)
-    #     c2 = a2.contribute(a1_disclosed)
-    #
-    #     contrib1.append(c1)
-    #     contrib2.append(c2)
-    #
-    #     #update money pot for each agent
-    #     r1 = ((c1*factor1 + c2*factor2)/2) - c1
-    #     r2 = ((c1*factor1 + c2*factor2)/2) - c2
-    #     a1.money += r1
-    #     a2.money += r2
-    #     a1.update_contrib_posterior(r1)
-    #     a2.update_contrib_posterior(r2)
-    #
-    #     plt.hist(np.random.beta(a1.a_disclose, a1.b_disclose, size=1000))
-    #     plt.title('Agent 1 disclosure posteriors')
-    #     plt.hist(np.random.beta(a2.a_disclose, a2.b_disclose, size=1000))
-    #     plt.title('Agent 2 disclosure posteriors')
-    #     plt.show()
+    df = pd.DataFrame(data=dd)
 
-    # plt.plot(range(nb_of_trials), p_disclose_1, label=f'Agent 1 ')
-    # plt.plot(range(nb_of_trials), p_disclose_2, label=f'Agent 2')
-    # plt.xlabel('Trials')
-    # plt.ylabel('P(disclose)')
-    # plt.ylim([0, 1])
-    # plt.legend()
-    # plt.show()
-    #
-    # plt.plot(range(nb_of_trials), contrib1, label=f'Agent 1 = {lr1}')
-    # plt.plot(range(nb_of_trials), contrib2, label=f'Agent 2 = {lr1}')
-    # plt.xlabel('Trials')
-    # plt.ylabel('Contribution')
-    # plt.legend()
-    # plt.ylim([0, 10])
-    # plt.show()
+    sns.set_palette('Set2')
+    ax = plt.subplot(121)
+    # ax.spines['bottom'].set_smart_bounds(True)
+    # ax.spines['left'].set_smart_bounds(True)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    x, y = [], []
+    for idx in range(len(agents)):
+        y.append(np.mean(df[df['id']==idx]['c']))
+        type1 = np.unique(df[df['id']==idx]['f'])
+        assert len(type1) == 1
+        x.append(type1[0])
+
+    sns.violinplot(x=x, y=y)
+    sns.stripplot(x=x, y=y, linewidth=.6, alpha=.7, edgecolor='w')
+    plt.title('contribution')
+
+    ax = plt.subplot(122)
+    # ax.spines['bottom'].set_smart_bounds(True)
+    # ax.spines['left'].set_smart_bounds(True)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    x, y = [], []
+    for idx in range(len(agents)):
+        y.append(np.mean(df[df['id']==idx]['d']))
+        type1 = np.unique(df[df['id']==idx]['f'])
+        assert len(type1) == 1
+        x.append(type1[0])
+
+    sns.violinplot(x=x, y=y)
+    sns.stripplot(x=x, y=y, linewidth=.6, alpha=.7, edgecolor='w')
+    plt.title('disclosure')
+    plt.ylim([0, 1])
+
+    plt.show()
+
+    sns.lineplot(x='t', y='r', data=df)
+    plt.show()
 
 if __name__ == '__main__':
     main()
