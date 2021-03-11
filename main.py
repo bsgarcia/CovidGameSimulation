@@ -3,8 +3,9 @@ import numpy as np
 import itertools as it
 import matplotlib.pyplot as plt
 import scipy.stats as stats
-
 import seaborn as sns
+import pandas as pd
+
 
 #
 # class BayesianAgent:
@@ -130,7 +131,6 @@ import seaborn as sns
 #     def disclose(self):
 
 
-
 class BayesianAgent:
     def __init__(self, money, factor, possible_factors, alpha, lr_contrib, beta):
         self.factor = factor
@@ -146,26 +146,25 @@ class BayesianAgent:
         ]}
 
         self.y_contrib = {k: v for k in [True, False]
-                for v in [
-                {k2: np.ones((1, money+1))[0] for k2 in [None, ] + possible_factors}
+                    for v in [
+                        {k2: np.ones((1, money+1))[0] for k2 in [None, ] + possible_factors}
          ]}
 
     def contribute(self, opp_factor, disclosed):
-        p_opp = np.random.dirichlet(self.y_contrib[disclosed][opp_factor])
+        p_opp = stats.dirichlet(self.y_contrib[disclosed][opp_factor]).mean()
         expected_rewards = np.zeros((self.money, self.money))
 
         if opp_factor is None:
             opp_factor = 1
 
-        for c1, c2 in it.product(
-                range(1, self.money+1), range(1, self.money+1)):
-            expected_rewards[c1-1, c2-1] = \
-                ((self.factor*c1 + opp_factor*c2)/2 - c1) * p_opp[c2-1]
+        for idx1, c1 in enumerate(range(1, self.money+1)):
+            for idx2, c2 in enumerate(range(1, self.money + 1)):
+                expected_rewards[idx1, idx2] = \
+                    ((self.factor*c1 + opp_factor*c2)/2 - c1) * p_opp[idx2]
 
-        mean_er = np.mean(expected_rewards, axis=1)
+        max_er = np.max(expected_rewards, axis=1)
 
-        return np.random.choice(range(1, self.money+1), p=self.softmax(mean_er))
-
+        return np.random.choice(range(1, self.money+1), p=self.softmax(max_er))
 
     def disclose(self):
         q = np.array([
@@ -186,15 +185,16 @@ class BayesianAgent:
         return np.exp(values*self.beta)/np.sum(np.exp(values*self.beta))
 
 
-
-def generate_agents(n_agents, money, agent_class):
+def generate_agents(n_agents, types, money, agent_class):
     agents = []
-    factors = [1.2 ] * (n_agents//2) + [1.2, ] * (n_agents//2)
+    factors = [types[0], ] * (n_agents//2) + [types[1], ] * (n_agents//2)
     np.random.shuffle(factors)
+    alphas = np.random.beta(1, 1, size=n_agents).tolist()
+    betas = np.random.gamma(1.2, 5, size=n_agents).tolist()
     for _ in range(n_agents):
         agents.append(
-            agent_class(money=money, factor=factors.pop(), possible_factors=[1.2, 1.2],
-                        alpha=.5, lr_contrib=2, beta=2
+            agent_class(money=money, factor=factors.pop(), possible_factors=types,
+                        alpha=alphas.pop(), lr_contrib=30, beta=betas.pop()
         ))
     return agents
 
@@ -205,13 +205,13 @@ def main():
     money = 10
 
     # total agent
-    n_agents = 50
-    n_trials = 800
+    n_agents = 100
+    n_trials = 500
+
+    types = [.8, 1.2]
 
     # generate all the agents
-    agents = generate_agents(n_agents, money, BayesianAgent)
-
-    import pandas as pd
+    agents = generate_agents(n_agents, types, money, BayesianAgent)
 
     dd = []
 
@@ -220,7 +220,7 @@ def main():
         agent_ids = list(range(n_agents))
         np.random.shuffle(agent_ids)
 
-        for _ in range(n_agents//2):
+        for round_id in range(n_agents//2):
 
             id1 = agent_ids.pop()
             id2 = agent_ids.pop()
@@ -246,55 +246,83 @@ def main():
             a2.learn(r2, a2_disclosed, f1)
 
             dd.append(
-                {'id': id1, 'c': c1, 't': t, 'f': a1.factor, 'd': a1_disclosed, 'r': r1}
+                {'round_id': int(f'{t}{round_id}'), 'id': id1,
+                 'c': c1, 't': t, 'f': 'bad' if a1.factor == types[0] else 'good', 'd': a1_disclosed, 'r': r1}
             )
             dd.append(
-                {'id': id2, 'c': c2, 't': t, 'f': a2.factor, 'd': a2_disclosed, 'r': r2}
+                {'round_id': int(f'{t}{round_id}'), 'id': id2,
+                 'c': c2, 't': t, 'f': 'bad' if a2.factor == types[0] else 'good', 'd': a2_disclosed, 'r': r2}
             )
 
-
     df = pd.DataFrame(data=dd)
-
     sns.set_palette('Set2')
+
+    # prepare data
+    # group by bad/good matching
+    dff = df[df.groupby('round_id')['f'].transform('nunique') > 1]
+    # Plot 1
     ax = plt.subplot(121)
-    # ax.spines['bottom'].set_smart_bounds(True)
-    # ax.spines['left'].set_smart_bounds(True)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 
-    x, y = [], []
-    for idx in range(len(agents)):
-        y.append(np.mean(df[df['id']==idx]['c']))
-        type1 = np.unique(df[df['id']==idx]['f'])
-        assert len(type1) == 1
-        x.append(type1[0])
+    df_mean = df.groupby(['id', 'f'], as_index=False)['c'].mean()
+    df_good = df_mean[df_mean['f'] == 'good']
+    df_bad = df_mean[df_mean['f'] == 'bad']
 
-    sns.violinplot(x=x, y=y)
-    sns.stripplot(x=x, y=y, linewidth=.6, alpha=.7, edgecolor='w')
+    sem1 = stats.sem(df_bad['c'])
+    sem2 = stats.sem(df_good['c'])
+
+    mean1 = np.mean(df_bad['c'])
+    mean2 = np.mean(df_good['c'])
+
+    sns.barplot(x=['bad', 'good'], y=[mean1, mean2], ci=None)
+
+    sns.stripplot(x='f', y='c', data=df_mean,
+                  linewidth=.6, alpha=.7, edgecolor='w')
+    plt.errorbar(
+        [0, 1], y=[mean1, mean2], yerr=[sem1, sem2], lw=2.5,
+        capsize=3, capthick=2.5, ecolor='black', ls='none', zorder=10)
     plt.title('contribution')
+    plt.ylim([0,10])
 
+    # Plot 2
     ax = plt.subplot(122)
-    # ax.spines['bottom'].set_smart_bounds(True)
-    # ax.spines['left'].set_smart_bounds(True)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 
-    x, y = [], []
-    for idx in range(len(agents)):
-        y.append(np.mean(df[df['id']==idx]['d']))
-        type1 = np.unique(df[df['id']==idx]['f'])
-        assert len(type1) == 1
-        x.append(type1[0])
+    df_mean = df.groupby(['id', 'f'], as_index=False)['d'].mean()
+    df_good = df_mean[df_mean['f'] == 'good']
+    df_bad = df_mean[df_mean['f'] == 'bad']
 
-    sns.violinplot(x=x, y=y)
-    sns.stripplot(x=x, y=y, linewidth=.6, alpha=.7, edgecolor='w')
+    sem1 = stats.sem(df_bad['d'])
+    sem2 = stats.sem(df_good['d'])
+
+    mean1 = np.mean(df_bad['d'])
+    mean2 = np.mean(df_good['d'])
+
+    sns.barplot(x=['bad', 'good'], y=[mean1, mean2], ci=None)
+
+    sns.stripplot(x='f', y='d', data=df_mean,
+                  linewidth=.6, alpha=.7, edgecolor='w')
+    plt.errorbar(
+        [0, 1], y=[mean1, mean2], yerr=[sem1, sem2], lw=2.5,
+        capsize=3, capthick=2.5, ecolor='black', ls='none', zorder=10)
     plt.title('disclosure')
-    plt.ylim([0, 1])
-
     plt.show()
 
-    sns.lineplot(x='t', y='r', data=df)
-    plt.show()
+    # Plot 3
+    fig, ax = plt.subplots()
+
+    # sem1 = df[df['f'] == 'bad'].groupby(['t'])['r'].sem()
+    # sem2 = df[df['f'] == 'good'].groupby(['t'])['r'].sem()
+    #
+    # mean1 = df[df['f'] == 'bad'].groupby(['t'])['r'].mean()
+    # mean2 = df[df['f'] == 'good'].groupby(['t'])['r'].mean()
+
+    # sns.tsplot(x='t', y='r', hue='f', data=df)
+    # plt.show()
+
+    print('exit')
 
 if __name__ == '__main__':
     main()
