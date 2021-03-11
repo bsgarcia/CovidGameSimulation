@@ -277,8 +277,8 @@ def main():
 
     sns.barplot(x=['bad', 'good'], y=[mean1, mean2], ci=None)
 
-    sns.stripplot(x='f', y='c', data=df_mean,
-                  linewidth=.6, alpha=.7, edgecolor='w')
+    # sns.stripplot(x='f', y='c', data=df_mean,
+    #               linewidth=.6, alpha=.7, edgecolor='w')
     plt.errorbar(
         [0, 1], y=[mean1, mean2], yerr=[sem1, sem2], lw=2.5,
         capsize=3, capthick=2.5, ecolor='black', ls='none', zorder=10)
@@ -302,8 +302,8 @@ def main():
 
     sns.barplot(x=['bad', 'good'], y=[mean1, mean2], ci=None)
 
-    sns.stripplot(x='f', y='d', data=df_mean,
-                  linewidth=.6, alpha=.7, edgecolor='w')
+    # sns.stripplot(x='f', y='d', data=df_mean,
+    #               linewidth=.6, alpha=.7, edgecolor='w')
     plt.errorbar(
         [0, 1], y=[mean1, mean2], yerr=[sem1, sem2], lw=2.5,
         capsize=3, capthick=2.5, ecolor='black', ls='none', zorder=10)
