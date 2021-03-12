@@ -130,9 +130,29 @@ import pandas as pd
 #
 #     def disclose(self):
 
+class SimpleAgent:
+    def __init__(self, **kwargs):
+        self.factor = kwargs['factor']
+
+    @staticmethod
+    def contribute(opp_factor, disclosed):
+        contribution = 9#np.random.choice([1, 9], p=[.1, .9])
+        return contribution
+
+    def disclose(self):
+        disclosed = np.random.random() < .8
+        return disclosed, self.factor if disclosed else None
+
+    def update_contrib_posterior(self, disclosed, opp_factor, opp_contrib):
+        pass
+
+    def learn(self, reward, disclosed, opp_type):
+        pass
+
 
 class BayesianAgent:
-    def __init__(self, money, factor, possible_factors, alpha, lr_contrib, beta):
+    def __init__(self, money, factor, possible_factors,
+                 alpha, lr_contrib, beta):
         self.factor = factor
         self.money = money
         
@@ -147,7 +167,8 @@ class BayesianAgent:
 
         self.y_contrib = {k: v for k in [True, False]
                     for v in [
-                        {k2: np.ones((1, money+1))[0] for k2 in [None, ] + possible_factors}
+                        {k2: np.ones(self.money)
+                         for k2 in [None, ] + possible_factors}
          ]}
 
     def contribute(self, opp_factor, disclosed):
@@ -173,7 +194,7 @@ class BayesianAgent:
         ])
 
         disclosed = np.random.choice([False, True], p=self.softmax(q))
-        return disclosed, self.factor if disclosed else None
+        return True, self.factor
 
     def update_contrib_posterior(self, disclosed, opp_factor, opp_contrib):
         self.y_contrib[disclosed][opp_factor][opp_contrib-1] += self.lr_contrib
@@ -188,14 +209,24 @@ class BayesianAgent:
 def generate_agents(n_agents, types, money, agent_class):
     agents = []
     factors = [types[0], ] * (n_agents//2) + [types[1], ] * (n_agents//2)
-    np.random.shuffle(factors)
+
+    # np.random.shuffle(factors)
     alphas = np.random.beta(1, 1, size=n_agents).tolist()
     betas = np.random.gamma(1.2, 5, size=n_agents).tolist()
     for _ in range(n_agents):
-        agents.append(
-            agent_class(money=money, factor=factors.pop(), possible_factors=types,
-                        alpha=alphas.pop(), lr_contrib=30, beta=betas.pop()
-        ))
+        if _ > n_agents//2:
+            agents.append(
+                agent_class[0](money=money, factor=factors[_],
+                                              possible_factors=types, alpha=alphas.pop(),
+                                              lr_contrib=1, beta=betas.pop()
+            ))
+        else:
+            agents.append(
+                agent_class[1](money=money, factor=factors[_],
+                               possible_factors=types, alpha=alphas.pop(),
+                               lr_contrib=1, beta=betas.pop()
+                               ))
+
     return agents
 
 
@@ -211,7 +242,8 @@ def main():
     types = [.8, 1.2]
 
     # generate all the agents
-    agents = generate_agents(n_agents, types, money, BayesianAgent)
+    agents = generate_agents(
+        n_agents, types, money, (BayesianAgent, SimpleAgent))
 
     dd = []
 
@@ -246,20 +278,26 @@ def main():
             a2.learn(r2, a2_disclosed, f1)
 
             dd.append(
-                {'round_id': int(f'{t}{round_id}'), 'id': id1,
-                 'c': c1, 't': t, 'f': 'bad' if a1.factor == types[0] else 'good', 'd': a1_disclosed, 'r': r1}
+                {'round_id': f'{t}_{round_id}', 'id': id1,
+                 'c': c1, 't': t, 'f': 'bad' if a1.factor == types[0] else 'good',
+                 'd': a1_disclosed, 'r': r1, 'class': a1.__class__.__name__,
+                 'a': a1.y_contrib[a1_disclosed][.8].copy() if hasattr(a1, 'y_contrib') else None}
             )
+
             dd.append(
-                {'round_id': int(f'{t}{round_id}'), 'id': id2,
-                 'c': c2, 't': t, 'f': 'bad' if a2.factor == types[0] else 'good', 'd': a2_disclosed, 'r': r2}
+                {'round_id': f'{t}_{round_id}', 'id': id2,
+                 'c': c2, 't': t, 'f': 'bad' if a2.factor == types[0] else 'good',
+                 'd': a2_disclosed, 'r': r2, 'class': a2.__class__.__name__,
+                 'a': a2.y_contrib[a2_disclosed][.8].copy() if hasattr(a2, 'y_contrib') else None}
             )
 
     df = pd.DataFrame(data=dd)
     sns.set_palette('Set2')
-
+    # import pdb;pdb.set_trace()
     # prepare data
     # group by bad/good matching
-    dff = df[df.groupby('round_id')['f'].transform('nunique') > 1]
+    dff = df[df.groupby(['round_id'])['class'].transform('nunique') > 1]
+    dff = dff[dff['class']=='BayesianAgent']
     # Plot 1
     ax = plt.subplot(121)
     ax.spines['top'].set_visible(False)
@@ -311,18 +349,51 @@ def main():
     plt.show()
 
     # Plot 3
-    fig, ax = plt.subplots()
+    # fig, ax = plt.subplots()
+
+    # def animate(t, ax):
+    #     df1 = df[df['t']==t]
+    #     try:
+        # df2 = df1[df1['class']=='BayesianAgent']
+        # throw = []
+        # for i in np.asarray(df2['a']):
+        #     throw.append(i)
+        # alphas = np.array(throw).mean(axis=0)
+        # a = np.random.dirichlet(alphas, size=10000)
+        #
+        # label = list(range(1, 11))
+        #
+        # ax.set_ydata(stats.beta.pdf(np.linspace(0,1,10), a=alphas[8], b=1))
+        #
+        # if t == 0:
+        #     plt.legend()
+        # plt.pause(.1)
+        # plt.draw()
+        # except:
+        #     print('h')
+        #     pass
+    #
+    # sns.distplot(x=)
+    # x = np.linspace(0, 1, 10)
+    # ax, = plt.plot(x, stats.beta.pdf(x, a=1, b=1), label='9', color=f'C{8}')
+    #
+    # for i in range(n_trials):
+    #     animate(t, ax=ax)
+
 
     # sem1 = df[df['f'] == 'bad'].groupby(['t'])['r'].sem()
     # sem2 = df[df['f'] == 'good'].groupby(['t'])['r'].sem()
-    #
+    # import matplotlib.animation
+    # ani = matplotlib.animation.FuncAnimation(fig, animate, frames=range(n_trials)[::10], repeat=True)#
     # mean1 = df[df['f'] == 'bad'].groupby(['t'])['r'].mean()
     # mean2 = df[df['f'] == 'good'].groupby(['t'])['r'].mean()
 
-    # sns.tsplot(x='t', y='r', hue='f', data=df)
-    # plt.show()
+    sns.lineplot(x='t', y='r', data=dff)
+    plt.legend()
+    plt.show()
 
     print('exit')
+
 
 if __name__ == '__main__':
     main()
