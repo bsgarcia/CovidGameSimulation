@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import scipy.stats as stats
 import seaborn as sns
 import pandas as pd
+import tqdm
 
 
 #
@@ -131,13 +132,28 @@ import pandas as pd
 #     def disclose(self):
 
 class SimpleAgent:
-    def __init__(self, **kwargs):
-        self.factor = kwargs['factor']
+    def __init__(self, money, factor, possible_factors,
+                     alpha, lr_contrib, beta):
+        self.factor = factor
+        self.money = money
 
-    @staticmethod
-    def contribute(opp_factor, disclosed):
-        contribution = 9#np.random.choice([1, 9], p=[.1, .9])
-        return contribution
+        self.lr_contrib = lr_contrib
+        self.alpha = alpha
+        self.beta = beta
+
+        self.q = {k: v for k in [True, False]
+                  for v in [
+                      {k2: 0 for k2 in [None, ] + possible_factors}
+                  ]}
+
+        self.y_contrib = {k: v for k in [True, False]
+                          for v in [
+                              {k2: np.ones(self.money)
+                               for k2 in [None, ] + possible_factors}
+                          ]}
+
+    def contribute(self, opp_factor, disclosed):
+        return np.random.choice(range(1, 11), p=[.0, .0, .0, .0, .0, .0, .0, .0, .3, .7])
 
     def disclose(self):
         disclosed = np.random.random() < .8
@@ -149,14 +165,18 @@ class SimpleAgent:
     def learn(self, reward, disclosed, opp_type):
         pass
 
+    def softmax(self, values):
+        return np.exp(values*self.beta)/np.sum(np.exp(values*self.beta))
+
 
 class BayesianAgent:
     def __init__(self, money, factor, possible_factors,
                  alpha, lr_contrib, beta):
         self.factor = factor
         self.money = money
-        
+
         self.lr_contrib = lr_contrib
+
         self.alpha = alpha
         self.beta = beta
 
@@ -185,6 +205,8 @@ class BayesianAgent:
 
         max_er = np.max(expected_rewards, axis=1)
 
+        # return max_er+1
+
         return np.random.choice(range(1, self.money+1), p=self.softmax(max_er))
 
     def disclose(self):
@@ -194,7 +216,7 @@ class BayesianAgent:
         ])
 
         disclosed = np.random.choice([False, True], p=self.softmax(q))
-        return True, self.factor
+        return disclosed, self.factor if disclosed else None
 
     def update_contrib_posterior(self, disclosed, opp_factor, opp_contrib):
         self.y_contrib[disclosed][opp_factor][opp_contrib-1] += self.lr_contrib
@@ -206,26 +228,27 @@ class BayesianAgent:
         return np.exp(values*self.beta)/np.sum(np.exp(values*self.beta))
 
 
-def generate_agents(n_agents, types, money, agent_class):
-    agents = []
-    factors = [types[0], ] * (n_agents//2) + [types[1], ] * (n_agents//2)
+def generate_agents(n_agents, ratio, types, money, agent_class):
 
-    # np.random.shuffle(factors)
+    factors = [types[0], ] * int((n_agents*ratio[0]))\
+            + [types[1], ] * int((n_agents*ratio[1]))
+    np.random.shuffle(factors)
+
+    classes = [agent_class[0], ] * int((n_agents*ratio[0]))\
+            + [agent_class[1], ] * int((n_agents*ratio[1]))
+    np.random.shuffle(classes)
+
     alphas = np.random.beta(1, 1, size=n_agents).tolist()
     betas = np.random.gamma(1.2, 5, size=n_agents).tolist()
+    lr_contrib = np.random.gamma(1.2, 5, size=n_agents).tolist()
+
+    agents = []
     for _ in range(n_agents):
-        if _ > n_agents//2:
-            agents.append(
-                agent_class[0](money=money, factor=factors[_],
-                                              possible_factors=types, alpha=alphas.pop(),
-                                              lr_contrib=1, beta=betas.pop()
-            ))
-        else:
-            agents.append(
-                agent_class[1](money=money, factor=factors[_],
-                               possible_factors=types, alpha=alphas.pop(),
-                               lr_contrib=1, beta=betas.pop()
-                               ))
+        agents.append(
+            classes.pop()(money=money, factor=factors.pop(),
+                    possible_factors=types, alpha=alphas.pop(),
+                    lr_contrib=lr_contrib.pop(), beta=betas.pop()
+        ))
 
     return agents
 
@@ -236,18 +259,19 @@ def main():
     money = 10
 
     # total agent
-    n_agents = 100
-    n_trials = 500
+    n_agents = 50
+    n_trials = 80
 
-    types = [.8, 1.2]
+    types = [.2, 1.8]
+    ratio = [.3, .7]
 
     # generate all the agents
     agents = generate_agents(
-        n_agents, types, money, (BayesianAgent, SimpleAgent))
+        n_agents, ratio, types, money, (BayesianAgent, SimpleAgent))
 
     dd = []
 
-    for t in range(n_trials):
+    for t in tqdm.tqdm(range(n_trials)):
 
         agent_ids = list(range(n_agents))
         np.random.shuffle(agent_ids)
@@ -263,11 +287,24 @@ def main():
             a1_disclosed, f1 = a1.disclose()
             a2_disclosed, f2 = a2.disclose()
 
-            c1 = a1.contribute(opp_factor=f2, disclosed=a1_disclosed)
-            c2 = a2.contribute(opp_factor=f1, disclosed=a2_disclosed)
+            if t == 0:
+                c1 = np.random.choice(range(1, money+1))
+                c2 = np.random.choice(range(1, money+1))
+            else:
+                c1 = a1.contribute(opp_factor=f2, disclosed=a1_disclosed)
+                c2 = a2.contribute(opp_factor=f1, disclosed=a2_disclosed)
 
             r1 = ((c1*a1.factor + c2*a2.factor)/2) - c1
             r2 = ((c1*a1.factor + c2*a2.factor)/2) - c2
+
+            max1 = np.zeros(money)
+            max2 = np.zeros(money)
+            for idx, c in enumerate(range(1, 11)):
+                max1[idx] = ((c*a1.factor + c2*a2.factor)/2) - c
+                max2[idx] = ((c1*a1.factor + c*a2.factor)/2) - c
+
+            corr1 = c1 in np.arange(1, money+1)[np.max(max1)==max1]
+            corr2 = c2 in np.arange(1, money+1)[np.max(max2)==max2]
 
             a1.update_contrib_posterior(
                 opp_contrib=c2, opp_factor=f2, disclosed=a1_disclosed)
@@ -280,24 +317,25 @@ def main():
             dd.append(
                 {'round_id': f'{t}_{round_id}', 'id': id1,
                  'c': c1, 't': t, 'f': 'bad' if a1.factor == types[0] else 'good',
-                 'd': a1_disclosed, 'r': r1, 'class': a1.__class__.__name__,
-                 'a': a1.y_contrib[a1_disclosed][.8].copy() if hasattr(a1, 'y_contrib') else None}
+                 'd': a1_disclosed, 'r': r1, 'class': a1.__class__.__name__, 'corr': corr1,
+                 'a': a1.y_contrib[a1_disclosed].copy() if hasattr(a1, 'y_contrib') else None}
             )
 
             dd.append(
                 {'round_id': f'{t}_{round_id}', 'id': id2,
                  'c': c2, 't': t, 'f': 'bad' if a2.factor == types[0] else 'good',
-                 'd': a2_disclosed, 'r': r2, 'class': a2.__class__.__name__,
-                 'a': a2.y_contrib[a2_disclosed][.8].copy() if hasattr(a2, 'y_contrib') else None}
+                 'd': a2_disclosed, 'r': r2, 'class': a2.__class__.__name__, 'corr': corr2,
+                 'a': a2.y_contrib[a2_disclosed].copy() if hasattr(a2, 'y_contrib') else None}
             )
 
     df = pd.DataFrame(data=dd)
+
+    plot(df)
+
+
+def plot(df):
     sns.set_palette('Set2')
-    # import pdb;pdb.set_trace()
-    # prepare data
-    # group by bad/good matching
-    dff = df[df.groupby(['round_id'])['class'].transform('nunique') > 1]
-    dff = dff[dff['class']=='BayesianAgent']
+
     # Plot 1
     ax = plt.subplot(121)
     ax.spines['top'].set_visible(False)
@@ -313,15 +351,27 @@ def main():
     mean1 = np.mean(df_bad['c'])
     mean2 = np.mean(df_good['c'])
 
-    sns.barplot(x=['bad', 'good'], y=[mean1, mean2], ci=None)
+    label = ['bad', 'good']
+    y = []
+    for i in range(2):
+        y.append(df_mean[df_mean['f']==label[i]]['c'].tolist())
 
-    # sns.stripplot(x='f', y='c', data=df_mean,
-    #               linewidth=.6, alpha=.7, edgecolor='w')
+    # sns.barplot(x=['bad', 'good'], y=[mean1, mean2], ci=None)
+    ax = sns.violinplot(data=y, inner=None, alpha=.2, linewidth=0)
+
+    for x in ax.collections:
+        x.set_alpha(.5)
+
+    sns.stripplot(data=y, linewidth=.7, edgecolor='black', alpha=.7, zorder=9)
     plt.errorbar(
-        [0, 1], y=[mean1, mean2], yerr=[sem1, sem2], lw=2.5,
-        capsize=3, capthick=2.5, ecolor='black', ls='none', zorder=10)
+        [0, 1], y=[mean1, mean2], yerr=[sem1, sem2], lw=3,
+        markersize=7, marker='o', markerfacecolor='w', markeredgecolor='black',
+        capsize=4, capthick=2.5, ecolor='black', ls='none', zorder=10)
+
     plt.title('contribution')
-    plt.ylim([0,10])
+    # ax.get_legend().remove()
+    plt.ylim([-0.08*10, 1.08*10])
+    plt.xticks(ticks=[0, 1], labels=['bad', 'good'])
 
     # Plot 2
     ax = plt.subplot(122)
@@ -338,15 +388,66 @@ def main():
     mean1 = np.mean(df_bad['d'])
     mean2 = np.mean(df_good['d'])
 
-    sns.barplot(x=['bad', 'good'], y=[mean1, mean2], ci=None)
+    label = ['bad', 'good']
+    y = []
+    for i in range(2):
+        y.append(df_mean[df_mean['f']==label[i]]['d'].tolist())
 
-    # sns.stripplot(x='f', y='d', data=df_mean,
+    ax = sns.violinplot(data=y, inner=None, alpha=.2, linewidth=0)
+
+    for x in ax.collections:
+        x.set_alpha(.5)
+
+    sns.stripplot(data=y, linewidth=.7, edgecolor='black', zorder=9, alpha=.7)
+    plt.errorbar(
+        [0, 1], y=[mean1, mean2], yerr=[sem1, sem2], lw=3, markersize=7, marker='o',
+        markerfacecolor='w', markeredgecolor='black',
+        capsize=4, capthick=2.5, ecolor='black', ls='none', zorder=10)
+
+    plt.title('disclosure')
+    plt.ylim([-0.08, 1.08])
+    plt.xticks(ticks=[0, 1], labels=['bad', 'good'])
+    # ax.get_legend().remove()
+    plt.show()
+
+
+    # plot 3
+    ax = plt.subplot(111)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    # df_mean = df.groupby(['id', 'f', 'round_id'])['c'].mean()
+    dff = df[df.groupby(['round_id'])['f'].transform('nunique') > 1]
+    dff_gb = dff[dff['f']=='good']
+    dff_bg = dff[dff['f']=='bad']
+    dff = df[df.groupby(['round_id'])['f'].transform('nunique') == 1]
+    dff_gg = dff[dff['f']=='good']
+    dff_bb = dff[dff['f']=='bad']
+
+    hue_order = ['good_vs_good', 'good_vs_bad', 'bad_vs_bad', 'bad_vs_good']
+
+    sem1 = stats.sem(dff_gg.groupby('id')['c'].mean())
+    sem2 = stats.sem(dff_gb.groupby('id')['c'].mean())
+    sem3 = stats.sem(dff_bb.groupby('id')['c'].mean())
+    sem4 = stats.sem(dff_bg.groupby('id')['c'].mean())
+
+    mean1 = np.mean(dff_gg.groupby('id')['c'].mean())
+    mean2 = np.mean(dff_gb.groupby('id')['c'].mean())
+    mean3 = np.mean(dff_bb.groupby('id')['c'].mean())
+    mean4 = np.mean(dff_bg.groupby('id')['c'].mean())
+
+    sns.barplot(x=hue_order, y=[mean1, mean2, mean3, mean4], ci=None)
+    # import pdb;pdb.set_trace()
+    # sns.stripplot(x='f', y='c', data=dff.mean(),
     #               linewidth=.6, alpha=.7, edgecolor='w')
     plt.errorbar(
-        [0, 1], y=[mean1, mean2], yerr=[sem1, sem2], lw=2.5,
+        [0, 1, 2, 3], y=[mean1, mean2, mean3, mean4], yerr=[sem1, sem2, sem3, sem4], lw=2.5,
         capsize=3, capthick=2.5, ecolor='black', ls='none', zorder=10)
-    plt.title('disclosure')
+
+    plt.title('contribution')
+    plt.ylim([0,10])
     plt.show()
+
 
     # Plot 3
     # fig, ax = plt.subplots()
@@ -388,7 +489,7 @@ def main():
     # mean1 = df[df['f'] == 'bad'].groupby(['t'])['r'].mean()
     # mean2 = df[df['f'] == 'good'].groupby(['t'])['r'].mean()
 
-    sns.lineplot(x='t', y='r', data=dff)
+    sns.lineplot(x='t', y='corr', hue='f', data=df)
     plt.legend()
     plt.show()
 
