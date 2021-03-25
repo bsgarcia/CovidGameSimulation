@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import scipy.stats as stats
 import seaborn as sns
 import pandas as pd
+import pymc3 as pm
 import tqdm
 
 
@@ -211,8 +212,8 @@ class BayesianAgent:
 
     def disclose(self):
         q = np.array([
-            np.mean(list(self.q[False].values())),
-            np.mean(list(self.q[True].values()))
+            np.sum(list(self.q[False].values())),
+            np.sum(list(self.q[True].values()))
         ])
 
         disclosed = np.random.choice([False, True], p=self.softmax(q))
@@ -259,11 +260,11 @@ def main():
     money = 10
 
     # total agent
-    n_agents = 50
-    n_trials = 80
+    n_agents = 500
+    n_trials = 200
 
-    types = [.2, 1.8]
-    ratio = [.3, .7]
+    types = [.8, 1.2]
+    ratio = [.5, .5]
 
     # generate all the agents
     agents = generate_agents(
@@ -489,7 +490,7 @@ def plot(df):
     # mean1 = df[df['f'] == 'bad'].groupby(['t'])['r'].mean()
     # mean2 = df[df['f'] == 'good'].groupby(['t'])['r'].mean()
 
-    sns.lineplot(x='t', y='corr', hue='f', data=df)
+    sns.lineplot(x='t', y='corr', hue='class', data=df[df.groupby('round_id')['class'].transform('nunique')>1])
     plt.legend()
     plt.show()
 

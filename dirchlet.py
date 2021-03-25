@@ -1,15 +1,25 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
-import scipy.stats as sp
+# import seaborn as sns
+# import scipy.stats as sp
+import arviz as az
+# import pymc3 as pm
 
 
-a = np.random.dirichlet([7, 1, 1], size=1)
-import pdb; pdb.set_trace()
-b = np.random.beta(1, 40, size=10**6)
-label = range(1, 7)
-for i in range(a.shape[1]):
-    sns.distplot(a[:,i], label=label[i], hist_kws={'edgecolor': 'w'})
+alphas = np.ones(10)
+alphas[2] = 2
+alphas[8] = 5
+alphas[7] = 10
+alphas[9] = 30
+a = np.random.dirichlet(alphas, size=99999)
 
-plt.legend()
+dd = {}
+label = range(1, 11)
+for i in label:
+    dd[f'C={i}'] = a[:, i - 1]
+
+az.plot_forest(dd, kind='ridgeplot', ridgeplot_overlap=7, ridgeplot_alpha=.7,
+               figsize=(10, 5), ridgeplot_truncate=False, combined=True, colors='cycle')
+plt.xlim([0,1])
+
 plt.show()
