@@ -5,132 +5,9 @@ import matplotlib.pyplot as plt
 import scipy.stats as stats
 import seaborn as sns
 import pandas as pd
-import pymc3 as pm
+# import pymc3 as pm
 import tqdm
 
-
-#
-# class BayesianAgent:
-#     def __init__(self, game_id, money, factor,
-#                  a_contrib, b_contrib, a_disclose, b_disclose, lr_disclose, lr_contrib):
-#         self.factor = factor
-#         self.game_id = game_id
-#         self.money = money
-#         self.a_contrib = a_contrib
-#         self.b_contrib = b_contrib
-#         self.a_disclose = a_disclose
-#         self.b_disclose = b_disclose
-#         self.lr_contrib = lr_contrib
-#         self.lr_disclose = lr_disclose
-#         self.q = 0
-#
-#     def contribute(self, opponent_disclosed):
-#         return np.round((np.random.beta(a=self.a_contrib, b=self.b_contrib)) * self.money)
-#
-#     def disclose(self):
-#         p_disclose = np.random.beta(a=self.a_disclose, b=self.b_disclose)
-#         return np.random.choice([0, 1], p=[1-p_disclose, p_disclose]), p_disclose
-#
-#     def update_disclosure_posterior(self, opponent_disclosed):
-#         self.a_disclose += self.lr_disclose * opponent_disclosed
-#         self.b_disclose += self.lr_disclose * (not opponent_disclosed)
-#
-#     def update_contrib_posterior(self, reward):
-#         self.a_contrib += self.lr_contrib * (reward >= self.q)
-#         self.b_contrib += self.lr_contrib * (reward <= self.q)
-#         self.q += .5 * (reward - self.q)
-
-
-# class KLevelAgent:
-#     def __init__(self, game_id, money, factor,
-#                  a_disclose, b_disclose, lr_disclose, temp, k_level):
-#         self.factor = factor
-#         self.game_id = game_id
-#         self.money = money
-#         self.init_endowment = money
-#         self.a_disclose = a_disclose
-#         self.b_disclose = b_disclose
-#         self.lr_disclose = lr_disclose
-#         self.k_level = k_level
-#         self.temp = temp
-#
-#     def contribute(self):
-#         if k_level == 0:
-#             contribution = np.random.choice(range(self.money))
-#         if k_level == 1:
-#             contrib, opponent_contrib, expected = [], [], []
-#
-#             for c1, c2 in it.product(
-#                     range(1, self.money+1), range(1, self.money+1)):
-#                 for f in self.possible_factors:
-#                     expected.append(
-#                         ((self.factor*c1 + f*c2)/2 + self.money - c1) * (1/self.init_endowment)
-#                     )
-#                     contrib.append(c1)
-#
-#             expected = np.array(np.round(expected, 1))
-#             contrib = np.array(contrib)
-#
-#             possible_contrib = contrib[np.max(expected) == expected]
-#
-#             if len(possible_contrib) > 1:
-#                 print(
-#                     'Warning: multiple contributions value maximize expected reward'
-#                 )
-#
-#             return np.random.choice(possible_contrib)
-#
-
-#
-# class DeterministicAgent:
-#     def __init__(self, game_id, money, factor, possible_factors):
-#         self.factor = factor
-#         self.possible_factors = possible_factors
-#         self.game_id = game_id
-#         self.money = money
-#         self.a = 10
-#         self.b = 10
-#
-#     def learn(self, opponent_factor):
-#         if opponent_factor==.8:
-#             self.a += 1
-#             return np.random.beta(a=self.a, b=self.b)*10
-#         elif opponent_factor is None:
-#             self.b += 1
-#
-#         else:
-#
-#
-#
-#     def contribute(self, opponent_disclosed, opponent_factor):
-#
-#
-#
-#         else:
-#             contrib, opponent_contrib, expected = [], [], []
-#
-#             for c1, c2 in it.product(
-#                     range(0, self.money+1), range(0, self.money+1)):
-#                 for f in self.possible_factors:
-#                     expected.append(
-#                         (self.factor*c1 + f*c2)/2 + self.money - c1
-#                     )
-#                     contrib.append(c1)
-#                     opponent_contrib.append(c2)
-#
-#             expected = np.array(np.round(expected, 1))
-#             contrib = np.array(contrib)
-#
-#             possible_contrib = contrib[np.max(expected) == expected]
-#
-#             if len(possible_contrib) > 1:
-#                 print(
-#                     'Warning: multiple contributions value maximize expected reward'
-#                 )
-#
-#             return np.random.choice(possible_contrib)
-#
-#     def disclose(self):
 
 class SimpleAgent:
     def __init__(self, money, factor, possible_factors,
@@ -254,6 +131,128 @@ def generate_agents(n_agents, ratio, types, money, agent_class):
     return agents
 
 
+def plot(df):
+    sns.set_palette('Set2')
+
+    # Plot 1 -- Contribution + disclosure
+    # Contribution
+    ax = plt.subplot(121)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    df_mean = df.groupby(['id', 'f'], as_index=False)['c'].mean()
+    df_good = df_mean[df_mean['f'] == 'good']
+    df_bad = df_mean[df_mean['f'] == 'bad']
+
+    sem1 = stats.sem(df_bad['c'])
+    sem2 = stats.sem(df_good['c'])
+
+    mean1 = np.mean(df_bad['c'])
+    mean2 = np.mean(df_good['c'])
+
+    label = ['bad', 'good']
+    y = []
+    for i in range(2):
+        y.append(df_mean[df_mean['f']==label[i]]['c'].tolist())
+
+    # sns.barplot(x=['bad', 'good'], y=[mean1, mean2], ci=None)
+    ax = sns.violinplot(data=y, inner=None, alpha=.2, linewidth=0)
+
+    for x in ax.collections:
+        x.set_alpha(.5)
+
+    sns.stripplot(data=y, linewidth=.7, edgecolor='black', alpha=.7, zorder=9)
+    plt.errorbar(
+        [0, 1], y=[mean1, mean2], yerr=[sem1, sem2], lw=3,
+        markersize=7, marker='o', markerfacecolor='w', markeredgecolor='black',
+        capsize=4, capthick=2.5, ecolor='black', ls='none', zorder=10)
+
+    plt.title('contribution')
+    # ax.get_legend().remove()
+    plt.ylim([-0.08*10, 1.08*10])
+    plt.xticks(ticks=[0, 1], labels=['bad', 'good'])
+
+    # Disclosure
+    ax = plt.subplot(122)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    df_mean = df.groupby(['id', 'f'], as_index=False)['d'].mean()
+    df_good = df_mean[df_mean['f'] == 'good']
+    df_bad = df_mean[df_mean['f'] == 'bad']
+
+    sem1 = stats.sem(df_bad['d'])
+    sem2 = stats.sem(df_good['d'])
+
+    mean1 = np.mean(df_bad['d'])
+    mean2 = np.mean(df_good['d'])
+
+    label = ['bad', 'good']
+    y = []
+    for i in range(2):
+        y.append(df_mean[df_mean['f']==label[i]]['d'].tolist())
+
+    ax = sns.violinplot(data=y, inner=None, alpha=.2, linewidth=0)
+
+    for x in ax.collections:
+        x.set_alpha(.5)
+
+    sns.stripplot(data=y, linewidth=.7, edgecolor='black', zorder=9, alpha=.7)
+    plt.errorbar(
+        [0, 1], y=[mean1, mean2], yerr=[sem1, sem2], lw=3, markersize=7, marker='o',
+        markerfacecolor='w', markeredgecolor='black',
+        capsize=4, capthick=2.5, ecolor='black', ls='none', zorder=10)
+
+    plt.title('disclosure')
+    plt.ylim([-0.08, 1.08])
+    plt.xticks(ticks=[0, 1], labels=['bad', 'good'])
+    # ax.get_legend().remove()
+    plt.show()
+
+
+    # Plot 2 --- Bar plot contribution (good/bad detail)
+    ax = plt.subplot(111)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    # df_mean = df.groupby(['id', 'f', 'round_id'])['c'].mean()
+    dff = df[df.groupby(['round_id'])['f'].transform('nunique') > 1]
+    dff_gb = dff[dff['f']=='good']
+    dff_bg = dff[dff['f']=='bad']
+    dff = df[df.groupby(['round_id'])['f'].transform('nunique') == 1]
+    dff_gg = dff[dff['f']=='good']
+    dff_bb = dff[dff['f']=='bad']
+
+    hue_order = ['good_vs_good', 'good_vs_bad', 'bad_vs_bad', 'bad_vs_good']
+
+    sem1 = stats.sem(dff_gg.groupby('id')['c'].mean())
+    sem2 = stats.sem(dff_gb.groupby('id')['c'].mean())
+    sem3 = stats.sem(dff_bb.groupby('id')['c'].mean())
+    sem4 = stats.sem(dff_bg.groupby('id')['c'].mean())
+
+    mean1 = np.mean(dff_gg.groupby('id')['c'].mean())
+    mean2 = np.mean(dff_gb.groupby('id')['c'].mean())
+    mean3 = np.mean(dff_bb.groupby('id')['c'].mean())
+    mean4 = np.mean(dff_bg.groupby('id')['c'].mean())
+
+    sns.barplot(x=hue_order, y=[mean1, mean2, mean3, mean4], ci=None)
+    plt.errorbar(
+        [0, 1, 2, 3], y=[mean1, mean2, mean3, mean4], yerr=[sem1, sem2, sem3, sem4], lw=2.5,
+        capsize=3, capthick=2.5, ecolor='black', ls='none', zorder=10)
+
+    plt.title('contribution')
+    plt.ylim([0,10])
+    plt.show()
+
+    # Plot 4 ----- correct choice rate (did the agent'choice maximizes expected value knowing opponent contribution)
+    # Control for learning
+    sns.lineplot(x='t', y='corr', hue='class', data=df[df.groupby('round_id')['class'].transform('nunique')>1])
+    plt.legend()
+    plt.show()
+
+    print('exit')
+
+
 def main():
 
     # endowment
@@ -332,169 +331,6 @@ def main():
     df = pd.DataFrame(data=dd)
 
     plot(df)
-
-
-def plot(df):
-    sns.set_palette('Set2')
-
-    # Plot 1
-    ax = plt.subplot(121)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-
-    df_mean = df.groupby(['id', 'f'], as_index=False)['c'].mean()
-    df_good = df_mean[df_mean['f'] == 'good']
-    df_bad = df_mean[df_mean['f'] == 'bad']
-
-    sem1 = stats.sem(df_bad['c'])
-    sem2 = stats.sem(df_good['c'])
-
-    mean1 = np.mean(df_bad['c'])
-    mean2 = np.mean(df_good['c'])
-
-    label = ['bad', 'good']
-    y = []
-    for i in range(2):
-        y.append(df_mean[df_mean['f']==label[i]]['c'].tolist())
-
-    # sns.barplot(x=['bad', 'good'], y=[mean1, mean2], ci=None)
-    ax = sns.violinplot(data=y, inner=None, alpha=.2, linewidth=0)
-
-    for x in ax.collections:
-        x.set_alpha(.5)
-
-    sns.stripplot(data=y, linewidth=.7, edgecolor='black', alpha=.7, zorder=9)
-    plt.errorbar(
-        [0, 1], y=[mean1, mean2], yerr=[sem1, sem2], lw=3,
-        markersize=7, marker='o', markerfacecolor='w', markeredgecolor='black',
-        capsize=4, capthick=2.5, ecolor='black', ls='none', zorder=10)
-
-    plt.title('contribution')
-    # ax.get_legend().remove()
-    plt.ylim([-0.08*10, 1.08*10])
-    plt.xticks(ticks=[0, 1], labels=['bad', 'good'])
-
-    # Plot 2
-    ax = plt.subplot(122)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-
-    df_mean = df.groupby(['id', 'f'], as_index=False)['d'].mean()
-    df_good = df_mean[df_mean['f'] == 'good']
-    df_bad = df_mean[df_mean['f'] == 'bad']
-
-    sem1 = stats.sem(df_bad['d'])
-    sem2 = stats.sem(df_good['d'])
-
-    mean1 = np.mean(df_bad['d'])
-    mean2 = np.mean(df_good['d'])
-
-    label = ['bad', 'good']
-    y = []
-    for i in range(2):
-        y.append(df_mean[df_mean['f']==label[i]]['d'].tolist())
-
-    ax = sns.violinplot(data=y, inner=None, alpha=.2, linewidth=0)
-
-    for x in ax.collections:
-        x.set_alpha(.5)
-
-    sns.stripplot(data=y, linewidth=.7, edgecolor='black', zorder=9, alpha=.7)
-    plt.errorbar(
-        [0, 1], y=[mean1, mean2], yerr=[sem1, sem2], lw=3, markersize=7, marker='o',
-        markerfacecolor='w', markeredgecolor='black',
-        capsize=4, capthick=2.5, ecolor='black', ls='none', zorder=10)
-
-    plt.title('disclosure')
-    plt.ylim([-0.08, 1.08])
-    plt.xticks(ticks=[0, 1], labels=['bad', 'good'])
-    # ax.get_legend().remove()
-    plt.show()
-
-
-    # plot 3
-    ax = plt.subplot(111)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-
-    # df_mean = df.groupby(['id', 'f', 'round_id'])['c'].mean()
-    dff = df[df.groupby(['round_id'])['f'].transform('nunique') > 1]
-    dff_gb = dff[dff['f']=='good']
-    dff_bg = dff[dff['f']=='bad']
-    dff = df[df.groupby(['round_id'])['f'].transform('nunique') == 1]
-    dff_gg = dff[dff['f']=='good']
-    dff_bb = dff[dff['f']=='bad']
-
-    hue_order = ['good_vs_good', 'good_vs_bad', 'bad_vs_bad', 'bad_vs_good']
-
-    sem1 = stats.sem(dff_gg.groupby('id')['c'].mean())
-    sem2 = stats.sem(dff_gb.groupby('id')['c'].mean())
-    sem3 = stats.sem(dff_bb.groupby('id')['c'].mean())
-    sem4 = stats.sem(dff_bg.groupby('id')['c'].mean())
-
-    mean1 = np.mean(dff_gg.groupby('id')['c'].mean())
-    mean2 = np.mean(dff_gb.groupby('id')['c'].mean())
-    mean3 = np.mean(dff_bb.groupby('id')['c'].mean())
-    mean4 = np.mean(dff_bg.groupby('id')['c'].mean())
-
-    sns.barplot(x=hue_order, y=[mean1, mean2, mean3, mean4], ci=None)
-    # import pdb;pdb.set_trace()
-    # sns.stripplot(x='f', y='c', data=dff.mean(),
-    #               linewidth=.6, alpha=.7, edgecolor='w')
-    plt.errorbar(
-        [0, 1, 2, 3], y=[mean1, mean2, mean3, mean4], yerr=[sem1, sem2, sem3, sem4], lw=2.5,
-        capsize=3, capthick=2.5, ecolor='black', ls='none', zorder=10)
-
-    plt.title('contribution')
-    plt.ylim([0,10])
-    plt.show()
-
-
-    # Plot 3
-    # fig, ax = plt.subplots()
-
-    # def animate(t, ax):
-    #     df1 = df[df['t']==t]
-    #     try:
-        # df2 = df1[df1['class']=='BayesianAgent']
-        # throw = []
-        # for i in np.asarray(df2['a']):
-        #     throw.append(i)
-        # alphas = np.array(throw).mean(axis=0)
-        # a = np.random.dirichlet(alphas, size=10000)
-        #
-        # label = list(range(1, 11))
-        #
-        # ax.set_ydata(stats.beta.pdf(np.linspace(0,1,10), a=alphas[8], b=1))
-        #
-        # if t == 0:
-        #     plt.legend()
-        # plt.pause(.1)
-        # plt.draw()
-        # except:
-        #     print('h')
-        #     pass
-    #
-    # sns.distplot(x=)
-    # x = np.linspace(0, 1, 10)
-    # ax, = plt.plot(x, stats.beta.pdf(x, a=1, b=1), label='9', color=f'C{8}')
-    #
-    # for i in range(n_trials):
-    #     animate(t, ax=ax)
-
-
-    # sem1 = df[df['f'] == 'bad'].groupby(['t'])['r'].sem()
-    # sem2 = df[df['f'] == 'good'].groupby(['t'])['r'].sem()
-    # import matplotlib.animation
-    # ani = matplotlib.animation.FuncAnimation(fig, animate, frames=range(n_trials)[::10], repeat=True)#
-    # mean1 = df[df['f'] == 'bad'].groupby(['t'])['r'].mean()
-    # mean2 = df[df['f'] == 'good'].groupby(['t'])['r'].mean()
-
-    sns.lineplot(x='t', y='corr', hue='class', data=df[df.groupby('round_id')['class'].transform('nunique')>1])
-    plt.legend()
-    plt.show()
-
-    print('exit')
 
 
 if __name__ == '__main__':
